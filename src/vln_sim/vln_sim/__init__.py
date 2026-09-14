@@ -8,6 +8,11 @@ from .bridge_core import (
 )
 from .mock_scene_adapter import MockSceneAdapter
 from .habitat_adapter import HabitatSimAdapter
+from .scenario_runner import (
+    ScenarioRunnerConfig,
+    run_batch,
+    run_episode,
+)
 
 __all__ = [
     "SimObservation",
@@ -16,4 +21,7 @@ __all__ = [
     "integrate_differential_drive",
     "MockSceneAdapter",
     "HabitatSimAdapter",
+    "ScenarioRunnerConfig",
+    "run_episode",
+    "run_batch",
 ]

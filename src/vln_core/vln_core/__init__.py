@@ -15,6 +15,18 @@ from .episode_manager import (
     EpisodeRecord,
     EpisodeState,
 )
+from .episode_scenario import (
+    EpisodeScenario,
+    SuccessRegion,
+    load_scenarios_from_yaml,
+    parse_scenarios,
+)
+from .evaluator import (
+    AggregateMetrics,
+    EpisodeMetrics,
+    EpisodeResult,
+    VlnEvaluator,
+)
 
 __all__ = [
     "PolicyActionData",
@@ -30,4 +42,12 @@ __all__ = [
     "EpisodeManagerConfig",
     "EpisodeRecord",
     "EpisodeState",
+    "EpisodeScenario",
+    "SuccessRegion",
+    "load_scenarios_from_yaml",
+    "parse_scenarios",
+    "AggregateMetrics",
+    "EpisodeMetrics",
+    "EpisodeResult",
+    "VlnEvaluator",
 ]
