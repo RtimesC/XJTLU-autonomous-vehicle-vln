@@ -79,3 +79,5 @@ def test_launch_files_compile_and_have_entrypoint():
         assert "generate_launch_description" in function_names, (
             f"{launch_file.name} missing 'generate_launch_description'"
         )
+        data = launch_file.read_text(encoding="utf-8")
+        assert "vln_episode_manager_node" in data

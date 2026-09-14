@@ -133,3 +133,13 @@ def test_client_cancellation():
     assert manager.active_record.state == EpisodeState.CANCELLED
     assert manager.active_record.termination_reason == "operator_e_stop"
     assert not manager.is_running
+
+
+def test_policy_failure_is_not_completion():
+    manager = EpisodeManager()
+    manager.start_episode("ep_failed", "fail me", monotonic_now=1.0)
+    finished, reason = manager.fail_episode("policy_failed", monotonic_now=1.5)
+    assert finished is True
+    assert reason == "policy_failed"
+    assert manager.active_record.state == EpisodeState.FAILED
+    assert manager.active_record.completed is False

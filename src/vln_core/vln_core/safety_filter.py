@@ -37,21 +37,26 @@ class SafetyFilter:
         self._last_linear_x: float = 0.0
         self._last_angular_z: float = 0.0
         self._last_stamp_sec: float = 0.0
+        self._last_action_sequence_id: Optional[int] = None
 
         # Safety trip flags
         self._emergency_stop: bool = False
         self._human_takeover: bool = False
         self._arbiter_denied: bool = False
 
-    def reset(self) -> None:
-        """Resets filter memory (velocities, timers, trip states)."""
+    def reset(self, preserve_overrides: bool = False) -> None:
+        """Resets command memory, optionally retaining external safety trips."""
+        emergency_stop = self._emergency_stop
+        human_takeover = self._human_takeover
+        arbiter_denied = self._arbiter_denied
         self._last_cmd_time_monotonic = None
         self._last_linear_x = 0.0
         self._last_angular_z = 0.0
         self._last_stamp_sec = 0.0
-        self._emergency_stop = False
-        self._human_takeover = False
-        self._arbiter_denied = False
+        self._last_action_sequence_id = None
+        self._emergency_stop = emergency_stop if preserve_overrides else False
+        self._human_takeover = human_takeover if preserve_overrides else False
+        self._arbiter_denied = arbiter_denied if preserve_overrides else False
 
     def set_emergency_stop(self, active: bool) -> None:
         self._emergency_stop = active
@@ -62,11 +67,20 @@ class SafetyFilter:
     def set_arbiter_denied(self, active: bool) -> None:
         self._arbiter_denied = active
 
+    @property
+    def emergency_stop_active(self) -> bool:
+        return self._emergency_stop
+
+    @property
+    def human_takeover_active(self) -> bool:
+        return self._human_takeover
+
     def check_watchdog(
         self,
         current_time_monotonic: Optional[float] = None,
         episode_id: str = "default_episode",
         action_seq_id: int = 0,
+        current_time_stamp_sec: Optional[float] = None,
     ) -> Tuple[TwistStampedData, SafetyStatusData]:
         """Periodic watchdog check.
 
@@ -74,7 +88,7 @@ class SafetyFilter:
         forces an active zero-velocity output and emits a timeout status.
         """
         now_mono = current_time_monotonic if current_time_monotonic is not None else time.monotonic()
-        now_wall = time.time()
+        now_stamp = current_time_stamp_sec if current_time_stamp_sec is not None else time.time()
 
         is_timeout = False
         if self._last_cmd_time_monotonic is None:
@@ -93,9 +107,9 @@ class SafetyFilter:
         if is_timeout:
             self._last_linear_x = 0.0
             self._last_angular_z = 0.0
-            safe_cmd = TwistStampedData(header_stamp_sec=now_wall, linear_x=0.0, angular_z=0.0)
+            safe_cmd = TwistStampedData(header_stamp_sec=now_stamp, linear_x=0.0, angular_z=0.0)
             status = SafetyStatusData(
-                header_stamp_sec=now_wall,
+                header_stamp_sec=now_stamp,
                 episode_id=episode_id,
                 action_sequence_id=action_seq_id,
                 command_accepted=False,
@@ -115,7 +129,7 @@ class SafetyFilter:
             angular_z=self._last_angular_z,
         )
         status = SafetyStatusData(
-            header_stamp_sec=now_wall,
+            header_stamp_sec=now_stamp,
             episode_id=episode_id,
             action_sequence_id=action_seq_id,
             command_accepted=True,
@@ -134,6 +148,7 @@ class SafetyFilter:
         episode_id: str,
         action_sequence_id: int,
         current_time_monotonic: Optional[float] = None,
+        current_time_stamp_sec: Optional[float] = None,
     ) -> Tuple[TwistStampedData, SafetyStatusData]:
         """Applies limits, acceleration smoothing, age verification, and safety trip checks.
 
@@ -158,7 +173,7 @@ class SafetyFilter:
                     emergency_stop=True,
                     policy_timeout=False,
                     human_takeover=self._human_takeover,
-                    reason_code=ReasonCode.REASON_OBSTACLE_STOP,
+                    reason_code=ReasonCode.REASON_EMERGENCY_STOP,
                     reason_detail="Emergency stop active. Command zeroed.",
                 ),
             )
@@ -222,12 +237,65 @@ class SafetyFilter:
                 ),
             )
 
+        # Reject replayed or reordered actions before they can refresh the
+        # watchdog. The adapter performs the same check at the policy boundary;
+        # keeping it here protects the command boundary independently.
+        if (
+            self._last_action_sequence_id is not None
+            and action_sequence_id <= self._last_action_sequence_id
+        ):
+            self._last_linear_x = 0.0
+            self._last_angular_z = 0.0
+            return (
+                TwistStampedData(header_stamp_sec=stamp, linear_x=0.0, angular_z=0.0),
+                SafetyStatusData(
+                    header_stamp_sec=stamp,
+                    episode_id=episode_id,
+                    action_sequence_id=action_sequence_id,
+                    command_accepted=False,
+                    command_modified=True,
+                    emergency_stop=False,
+                    policy_timeout=False,
+                    human_takeover=False,
+                    reason_code=ReasonCode.REASON_ACTION_EXPIRED,
+                    reason_detail=(
+                        f"Out-of-order action sequence {action_sequence_id}; "
+                        f"last accepted sequence was {self._last_action_sequence_id}."
+                    ),
+                ),
+            )
+
+        # Observation timestamps and the local monotonic clock are different
+        # domains. The ROS node supplies the current ROS timestamp explicitly;
+        # omitting it keeps the standalone deterministic API usable in tests.
+        if current_time_stamp_sec is not None:
+            action_age = current_time_stamp_sec - stamp
+            if action_age > self.config.max_action_age_sec or action_age < 0.0:
+                self._last_linear_x = 0.0
+                self._last_angular_z = 0.0
+                return (
+                    TwistStampedData(header_stamp_sec=stamp, linear_x=0.0, angular_z=0.0),
+                    SafetyStatusData(
+                        header_stamp_sec=stamp,
+                        episode_id=episode_id,
+                        action_sequence_id=action_sequence_id,
+                        command_accepted=False,
+                        command_modified=True,
+                        emergency_stop=False,
+                        policy_timeout=False,
+                        human_takeover=False,
+                        reason_code=ReasonCode.REASON_ACTION_EXPIRED,
+                        reason_detail=f"Action observation age is {action_age * 1000.0:.1f} ms.",
+                    ),
+                )
+
         # 3. Time freshness & dt calculation
         dt = 0.1  # default nominal dt if first step
         if self._last_cmd_time_monotonic is not None:
             dt = max(0.001, now_mono - self._last_cmd_time_monotonic)
 
         self._last_cmd_time_monotonic = now_mono
+        self._last_action_sequence_id = action_sequence_id
 
         target_vx = raw_cmd.linear_x
         target_wz = raw_cmd.angular_z

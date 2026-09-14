@@ -1,10 +1,10 @@
 # VLN ROS 2 接口契约
 
-状态：v0.1 暂定设计，尚未实现
+状态：v0.2 控制链实现，ROS 2 与实车仍待目标环境验证
 
 目标平台：ROS 2 Humble
 
-更新日期：2026-09-10
+更新日期：2026-09-14
 
 ## 1. 目的
 
@@ -16,8 +16,8 @@
 
 | 节点 | 所属仓库 | 职责 | 明确禁止 |
 |---|---|---|---|
-| `vln_policy_node` | VLN | 图像和指令编码、历史状态、模型推理 | 发布 `/cmd_vel`、读取地图或 Nav2 路径 |
-| `vln_action_adapter` | VLN | 将策略动作转换为带时间戳速度候选，执行停止阈值 | 规划路径、隐藏修改原始动作 |
+| `vln_policy_node` | VLN | 图像和指令编码、历史状态、模型推理 | 发布 `/cmd_vel`、读取地图或 Nav2 路径；自行生成 episode ID |
+| `vln_action_adapter` | VLN | 将策略动作转换为带上下文速度候选，执行停止阈值 | 规划路径、隐藏修改原始动作 |
 | `vln_safety_node` | VLN | 限幅、加速度约束、超时和紧急停车 | 自动选择绕障方向 |
 | `vln_episode_manager` | VLN | episode 生命周期、指令与结果记录 | 根据真实位置替模型触发正常停止 |
 | `vln_evaluator` | VLN | 使用真值计算指标 | 向在线策略回传真值或导航提示 |
@@ -33,9 +33,9 @@
     -> vln_policy_node
     -> /vln/policy_action
     -> vln_action_adapter
-    -> /vln/raw_cmd_vel
+    -> /vln/raw_cmd_vel (`VlnCommand`)
     -> vln_safety_node
-    -> /vln/safe_cmd_vel
+    -> /vln/safe_cmd_vel (`VlnCommand`)
     -> command_arbiter
     -> /cmd_vel
     -> serial_twistctl_node
@@ -61,6 +61,12 @@ float32 stop_probability
 float32 inference_latency_ms
 bool valid
 string model_version
+
+uint8 outcome
+string outcome_detail
+uint8 OUTCOME_RUNNING = 0
+uint8 OUTCOME_STOP_REQUESTED = 1
+uint8 OUTCOME_FAILED = 2
 ```
 
 语义：
@@ -74,9 +80,23 @@ string model_version
 - `valid=false`：动作不得继续进入速度适配链路；
 - `model_version`：可追溯到模型配置与权重摘要，不得只写可变的 `latest`。
 
-任何 NaN、Inf、越界停止概率或 episode ID 不匹配均视为无效动作。
+任何 NaN、Inf、越界停止概率、错误 frame、未知 outcome 或 episode ID 不匹配均视为无效动作。
 
-### 4.2 `vln_interfaces/msg/SafetyStatus.msg`
+`OUTCOME_FAILED` 表示策略无法完成任务，必须进入失败结果，不能通过 `p_stop=1` 模拟停车。
+
+### 4.2 `vln_interfaces/msg/EpisodeControl.msg`
+
+由 episode manager 发布到 `/vln/episode_control`，包含完整 `episode_id`、instruction 和 `START/CANCEL/TERMINATE` 命令。所有 policy、adapter 和 safety 节点必须使用该 ID，不得重新生成。
+
+### 4.3 `vln_interfaces/msg/EpisodeEvent.msg`
+
+adapter 在停止确认或策略失败时发布 `/vln/episode_event`。事件包括 `EVENT_STOP_LATCH` 和 `EVENT_POLICY_FAILED`，episode manager 只根据这些事件完成或失败 episode。
+
+### 4.4 `vln_interfaces/msg/VlnCommand.msg`
+
+候选和安全命令使用带 `episode_id`、`policy_sequence_id`、原始 `Header` 与 `geometry_msgs/Twist` 的 envelope，确保速度命令转换后仍可追溯到策略动作。
+
+### 4.5 `vln_interfaces/msg/SafetyStatus.msg`
 
 暂定字段：
 
@@ -99,7 +119,7 @@ string reason_detail
 
 `reason_detail` 只用于人类诊断，指标统计必须依据 `reason_code`，不能解析自由文本。
 
-### 4.3 `vln_interfaces/action/NavigateLanguage.action`
+### 4.6 `vln_interfaces/action/NavigateLanguage.action`
 
 暂定定义：
 
@@ -134,16 +154,18 @@ float32 latest_stop_probability
 | `/vln/input/image` | `sensor_msgs/msg/Image` | 相机驱动，经 remap | policy | Sensor Data、Keep Last 1 |
 | `/vln/input/camera_info` | `sensor_msgs/msg/CameraInfo` | 相机驱动，经 remap | 预处理/记录 | Reliable、Keep Last 1 |
 | `/vln/policy_action` | `vln_interfaces/msg/PolicyAction` | policy | adapter、logger | Reliable、Keep Last 1 |
-| `/vln/raw_cmd_vel` | `geometry_msgs/msg/TwistStamped` | adapter | safety、logger | Reliable、Keep Last 1 |
-| `/vln/safe_cmd_vel` | `geometry_msgs/msg/TwistStamped` | safety | arbiter、logger | Reliable、Keep Last 1 |
+| `/vln/episode_control` | `vln_interfaces/msg/EpisodeControl` | episode manager | policy、adapter、safety | Reliable、Transient Local、Keep Last 1 |
+| `/vln/episode_event` | `vln_interfaces/msg/EpisodeEvent` | adapter | episode manager、logger | Reliable、Keep Last 20 |
+| `/vln/raw_cmd_vel` | `vln_interfaces/msg/VlnCommand` | adapter | safety、logger | Reliable、Keep Last 1 |
+| `/vln/safe_cmd_vel` | `vln_interfaces/msg/VlnCommand` | safety | arbiter、logger | Reliable、Keep Last 1 |
 | `/vln/safety_status` | `vln_interfaces/msg/SafetyStatus` | safety | episode manager、logger | Reliable、Keep Last 20 |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | 原车 arbiter | serial bridge、logger | 服从原车契约 |
 
 ROS 2 QoS 的具体 deadline 和 liveliness 参数需通过 Jetson 与实际相机测试确认，但任何实现都必须保持队列有界，避免积压旧图像或旧动作。
 
-## 6. `TwistStamped` 字段约定
+## 6. `VlnCommand` 时间与速度字段约定
 
-对 `/vln/raw_cmd_vel` 和 `/vln/safe_cmd_vel`：
+对 `/vln/raw_cmd_vel` 和 `/vln/safe_cmd_vel` 的 `VlnCommand.header`：
 
 - `header.stamp` 沿用产生该动作的图像观测时间；
 - `header.frame_id = base_link`；
@@ -180,7 +202,7 @@ ROS 2 QoS 的具体 deadline 和 liveliness 参数需通过 Jetson 与实际相�
 
 1. 始终原样记录 `PolicyAction`；
 2. 达到停止条件后立即输出零速度；
-3. 通知 episode manager 策略请求终止；
+3. 发布 `EVENT_STOP_LATCH` 通知 episode manager 策略请求终止；
 4. 后续非零动作不得自动恢复同一 episode；
 5. evaluator 独立判断停止位置是否位于成功区域。
 
@@ -200,6 +222,7 @@ ROS 2 QoS 的具体 deadline 和 liveliness 参数需通过 Jetson 与实际相�
 - 安全节点内部错误；
 - 人工接管或物理急停；
 - 仲裁器拒绝 VLN 控制权。
+- episode 未收到 `COMMAND_START` 或已收到 `COMMAND_CANCEL/TERMINATE`。
 
 车辆级 watchdog 必须独立于 VLN 进程存在。即使整个 VLN 仓库中的节点崩溃，底盘也必须在验证过的超时时间内归零。
 
@@ -244,6 +267,8 @@ FAST-LIO2、TF、RTK、雷达真值和目标区域信息可以由 `vln_evaluator
 7. rosbag 回放使用原始图像时间戳，而不是回放机器的墙钟；
 8. 日志能够对应同一动作的原始、安全和最终三个版本；
 9. STM32 通信中断后在验证过的阈值内归零。
+10. policy failure 不得被 episode manager 判定为正常完成；
+11. 新 episode 的 ID 必须贯穿 control、action、command 和 safety status。
 
 ## 13. 版本与兼容性
 

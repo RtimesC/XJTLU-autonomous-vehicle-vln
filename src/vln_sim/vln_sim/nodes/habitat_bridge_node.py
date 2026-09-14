@@ -9,12 +9,12 @@ try:
     import rclpy
     from rclpy.node import Node
     from sensor_msgs.msg import Image
-    from geometry_msgs.msg import TwistStamped
+    from vln_interfaces.msg import VlnCommand
 except ImportError:
     rclpy = None
     Node = object
     Image = None
-    TwistStamped = None
+    VlnCommand = None
 
 from vln_sim.bridge_core import BaseSimAdapter
 from vln_sim.mock_scene_adapter import MockSceneAdapter
@@ -34,6 +34,8 @@ class VlnHabitatBridgeNode(Node if rclpy else object):
         self.declare_parameter('scene_path', 'data/scene_datasets/habitat-test-scenes/skokloster-castle.glb')
         self.declare_parameter('image_width', 640)
         self.declare_parameter('image_height', 480)
+        self.declare_parameter('sensor_height', 0.45)
+        self.declare_parameter('hfov', 90.0)
         self.declare_parameter('step_rate_hz', 10.0)
         self.declare_parameter('watchdog_timeout_sec', 0.5)
 
@@ -41,6 +43,8 @@ class VlnHabitatBridgeNode(Node if rclpy else object):
         scene_path = self.get_parameter('scene_path').get_parameter_value().string_value
         width = self.get_parameter('image_width').get_parameter_value().integer_value
         height = self.get_parameter('image_height').get_parameter_value().integer_value
+        sensor_height = self.get_parameter('sensor_height').get_parameter_value().double_value
+        hfov = self.get_parameter('hfov').get_parameter_value().double_value
         self.rate_hz = self.get_parameter('step_rate_hz').get_parameter_value().double_value
         self.watchdog_sec = self.get_parameter('watchdog_timeout_sec').get_parameter_value().double_value
 
@@ -48,7 +52,13 @@ class VlnHabitatBridgeNode(Node if rclpy else object):
         self.adapter: BaseSimAdapter
         if backend == 'habitat' or (backend == 'auto' and habitat_sim is not None):
             self.get_logger().info(f"Initializing real HabitatSimAdapter (scene={scene_path})")
-            self.adapter = HabitatSimAdapter(scene_path=scene_path, width=width, height=height)
+            self.adapter = HabitatSimAdapter(
+                scene_path=scene_path,
+                width=width,
+                height=height,
+                sensor_height=sensor_height,
+                hfov=hfov,
+            )
         else:
             self.get_logger().info("Initializing MockSceneAdapter (synthetic corridor simulator)")
             self.adapter = MockSceneAdapter(width=width, height=height)
@@ -68,7 +78,7 @@ class VlnHabitatBridgeNode(Node if rclpy else object):
             depth=1,
         )
         self.cmd_sub = self.create_subscription(
-            TwistStamped,
+            VlnCommand,
             '/vln/safe_cmd_vel',
             self.cmd_callback,
             qos_cmd,
@@ -89,7 +99,7 @@ class VlnHabitatBridgeNode(Node if rclpy else object):
             f"vln_habitat_bridge_node started ({self.rate_hz} Hz, {width}x{height})"
         )
 
-    def cmd_callback(self, msg: TwistStamped):
+    def cmd_callback(self, msg: VlnCommand):
         self._target_v = msg.twist.linear.x
         self._target_w = msg.twist.angular.z
         self._last_cmd_monotonic = time.monotonic()

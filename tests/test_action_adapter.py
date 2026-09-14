@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src/vln_core")))
 
 from vln_core.action_adapter import ActionAdapter, ActionAdapterConfig
-from vln_core.protocol import PolicyActionData
+from vln_core.protocol import PolicyActionData, PolicyOutcome
 
 
 def make_action(seq: int, v: float = 0.5, w: float = 0.0, p_stop: float = 0.1, ep: str = "ep_001") -> PolicyActionData:
@@ -105,3 +105,16 @@ def test_reset_episode():
     twist, stopped, _ = adapter.process_action(make_action(seq=1, v=0.3, p_stop=0.1, ep="ep_002"))
     assert twist.linear_x == pytest.approx(0.3)
     assert stopped is False
+
+
+def test_policy_failure_does_not_trigger_success_stop():
+    adapter = ActionAdapter()
+    adapter.reset_episode("ep_failed")
+    failure = make_action(seq=1, v=0.0, p_stop=0.0, ep="ep_failed")
+    failure.outcome = PolicyOutcome.FAILED
+    failure.outcome_detail = "search exhausted"
+    twist, stopped, detail = adapter.process_action(failure)
+    assert twist.linear_x == 0.0
+    assert stopped is False
+    assert adapter.is_stopped is False
+    assert "failure" in detail

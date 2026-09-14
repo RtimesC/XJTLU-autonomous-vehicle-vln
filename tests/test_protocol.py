@@ -8,7 +8,7 @@ import os
 # Add src/vln_core to path for testing without installing
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src/vln_core")))
 
-from vln_core.protocol import PolicyActionData, ReasonCode, validate_policy_action
+from vln_core.protocol import PolicyActionData, PolicyOutcome, ReasonCode, validate_policy_action
 
 
 def make_valid_action(**kwargs) -> PolicyActionData:
@@ -79,3 +79,15 @@ def test_empty_model_version():
     is_valid, err = validate_policy_action(action)
     assert is_valid is False
     assert "model_version" in err
+
+
+def test_frame_id_and_outcome_are_validated():
+    action = make_valid_action(frame_id="odom")
+    is_valid, err = validate_policy_action(action)
+    assert is_valid is False
+    assert "frame_id" in err
+
+    action = make_valid_action(outcome=PolicyOutcome.FAILED)
+    is_valid, err = validate_policy_action(action)
+    assert is_valid is True
+    assert err is None

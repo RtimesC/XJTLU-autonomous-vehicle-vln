@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from vln_core.protocol import PolicyActionData
+from vln_core.protocol import PolicyActionData, PolicyOutcome
 
 
 class DoorNavState(str, Enum):
@@ -281,12 +281,18 @@ class ReactiveDoorNavPolicy:
                 inference_latency_ms=0.5,
                 valid=True,
                 model_version=self.config.model_version,
+                outcome=(PolicyOutcome.STOP_REQUESTED if self._state == DoorNavState.STOP else PolicyOutcome.FAILED),
+                outcome_detail=("stop latched" if self._state == DoorNavState.STOP else "policy already failed"),
             )
 
         if self._step_counter >= self.config.max_episode_steps:
             self._state = DoorNavState.FAILED
             self._is_terminated = True
-            return self._make_action(stamp, 0.0, 0.0, 1.0, start_mono)
+            return self._make_action(
+                stamp, 0.0, 0.0, 0.0, start_mono,
+                outcome=PolicyOutcome.FAILED,
+                outcome_detail="maximum policy episode steps exceeded",
+            )
 
         # 1. Detection and tracking
         candidates = self.grounder.detect(rgb_image)
@@ -299,7 +305,11 @@ class ReactiveDoorNavPolicy:
             if self._search_steps > self.config.max_search_steps:
                 self._state = DoorNavState.FAILED
                 self._is_terminated = True
-                return self._make_action(stamp, 0.0, 0.0, 1.0, start_mono)
+                return self._make_action(
+                    stamp, 0.0, 0.0, 0.0, start_mono,
+                    outcome=PolicyOutcome.FAILED,
+                    outcome_detail="doorway lost beyond search tolerance",
+                )
 
             # SEARCH: Rotate to find doorway
             self._state = DoorNavState.SEARCH
@@ -331,7 +341,11 @@ class ReactiveDoorNavPolicy:
                 # STOP: Reached doorway with consecutive confirmation
                 self._state = DoorNavState.STOP
                 self._is_terminated = True
-                return self._make_action(stamp, 0.0, 0.0, 0.98, start_mono)
+                return self._make_action(
+                    stamp, 0.0, 0.0, 0.98, start_mono,
+                    outcome=PolicyOutcome.STOP_REQUESTED,
+                    outcome_detail="doorway arrival confirmed",
+                )
 
             # VERIFY: Slow final approach while confirming
             self._state = DoorNavState.VERIFY
@@ -355,6 +369,8 @@ class ReactiveDoorNavPolicy:
         w: float,
         p_stop: float,
         start_mono: float,
+        outcome: PolicyOutcome = PolicyOutcome.RUNNING,
+        outcome_detail: str = "",
     ) -> PolicyActionData:
         elapsed_ms = (time.monotonic() - start_mono) * 1000.0
         return PolicyActionData(
@@ -368,4 +384,6 @@ class ReactiveDoorNavPolicy:
             inference_latency_ms=float(elapsed_ms),
             valid=True,
             model_version=self.config.model_version,
+            outcome=outcome,
+            outcome_detail=outcome_detail,
         )

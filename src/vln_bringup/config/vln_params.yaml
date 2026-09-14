@@ -7,6 +7,7 @@ vln_mock_policy_node:
     steps_to_stop: 30
     episode_id: "ep_mock_001"
     instruction: "follow corridor forward and stop before elevator"
+    autostart: false
 
 vln_action_adapter:
   ros__parameters:
@@ -21,4 +22,10 @@ vln_safety_node:
     max_linear_accel: 0.8
     max_angular_accel: 1.5
     watchdog_timeout_sec: 0.4
+    max_action_age_sec: 0.5
+
+vln_episode_manager_node:
+  ros__parameters:
+    max_duration_sec: 60.0
+    max_steps: 500
     timer_frequency_hz: 20.0

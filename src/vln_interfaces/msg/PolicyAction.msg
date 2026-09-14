@@ -19,3 +19,10 @@ bool valid
 
 # Traceable model architecture and weights identifier
 string model_version
+
+# Policy lifecycle outcome. RUNNING is the default for a valid motion action.
+uint8 outcome
+string outcome_detail
+uint8 OUTCOME_RUNNING = 0
+uint8 OUTCOME_STOP_REQUESTED = 1
+uint8 OUTCOME_FAILED = 2

@@ -138,6 +138,15 @@ class EpisodeManager:
             return True, rec.termination_reason
 
         # 3. Check duration timeout
+        return self.check_timeout(monotonic_now=now_mono)
+
+    def check_timeout(self, monotonic_now: Optional[float] = None) -> Tuple[bool, str]:
+        """Checks the deadline even when no policy action is arriving."""
+        if not self.is_running:
+            return True, "No active episode running."
+
+        now_mono = monotonic_now if monotonic_now is not None else time.monotonic()
+        rec = self._active_record
         if (now_mono - rec.start_time_monotonic) > self.config.max_duration_sec:
             rec.state = EpisodeState.FAILED
             rec.completed = False
@@ -146,6 +155,23 @@ class EpisodeManager:
             return True, rec.termination_reason
 
         return False, "running"
+
+    def fail_episode(
+        self,
+        reason: str = "policy_failed",
+        monotonic_now: Optional[float] = None,
+    ) -> Tuple[bool, str]:
+        """Aborts the active episode without conflating failure with stop."""
+        if not self.is_running:
+            return False, "No active episode to fail."
+
+        now_mono = monotonic_now if monotonic_now is not None else time.monotonic()
+        rec = self._active_record
+        rec.state = EpisodeState.FAILED
+        rec.completed = False
+        rec.termination_reason = reason
+        rec.end_time_monotonic = now_mono
+        return True, reason
 
     def cancel_episode(
         self,

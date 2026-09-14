@@ -9,7 +9,7 @@ import sys
 import os
 # Ensure vln_core is importable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../vln_core")))
-from vln_core.protocol import PolicyActionData
+from vln_core.protocol import PolicyActionData, PolicyOutcome
 
 
 @dataclass
@@ -86,11 +86,13 @@ class MockPolicy:
             v = 0.0
             w = 0.0
             p_stop = self.config.stop_probability_active
+            outcome = PolicyOutcome.STOP_REQUESTED
         else:
             # Cruising towards destination
             v = self.config.target_linear_velocity
             w = self.config.target_angular_velocity
             p_stop = self.config.stop_probability_cruising
+            outcome = PolicyOutcome.RUNNING
 
         # Record action in history
         self._action_history.append((v, w))
@@ -106,4 +108,5 @@ class MockPolicy:
             inference_latency_ms=float(self.config.simulated_latency_ms),
             valid=True,
             model_version=self.config.model_version,
+            outcome=outcome,
         )

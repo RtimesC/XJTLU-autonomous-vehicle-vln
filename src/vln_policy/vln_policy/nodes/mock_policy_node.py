@@ -7,13 +7,12 @@ try:
     import rclpy
     from rclpy.node import Node
     from sensor_msgs.msg import Image
-    from std_msgs.msg import String
-    from vln_interfaces.msg import PolicyAction
+    from vln_interfaces.msg import EpisodeControl, PolicyAction
 except ImportError:
     rclpy = None
     Node = object
     Image = None
-    String = None
+    EpisodeControl = None
     PolicyAction = None
 
 from vln_policy.mock_policy import MockPolicy, MockPolicyConfig
@@ -35,6 +34,7 @@ class VlnMockPolicyNode(Node if rclpy else object):
         self.declare_parameter('steps_to_stop', 30)
         self.declare_parameter('episode_id', 'ep_mock_001')
         self.declare_parameter('instruction', 'go straight for 3 seconds then stop')
+        self.declare_parameter('autostart', False)
 
         mode = self.get_parameter('mode').get_parameter_value().string_value
         freq = self.get_parameter('frequency_hz').get_parameter_value().double_value
@@ -64,12 +64,19 @@ class VlnMockPolicyNode(Node if rclpy else object):
             qos_profile,
         )
 
-        # Optional subscriber for instruction updates / resets
+        self._active = self.get_parameter('autostart').get_parameter_value().bool_value
+        # Episode manager is the only source of episode identity and instruction.
+        qos_control = rclpy.qos.QoSProfile(
+            reliability=rclpy.qos.ReliabilityPolicy.RELIABLE,
+            durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
+            history=rclpy.qos.HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         self.instruction_sub = self.create_subscription(
-            String,
-            '/vln/goal_instruction',
-            self.instruction_callback,
-            10,
+            EpisodeControl,
+            '/vln/episode_control',
+            self.control_callback,
+            qos_control,
         )
 
         self.mode = mode
@@ -92,11 +99,18 @@ class VlnMockPolicyNode(Node if rclpy else object):
             )
             self.get_logger().info("MockPolicy running in IMAGE_DRIVEN mode (waiting for /vln/input/image)")
 
-    def instruction_callback(self, msg: String):
-        self.get_logger().info(f"Received new instruction: '{msg.data}'. Resetting episode.")
-        self.policy.reset(episode_id=f"ep_{int(self.get_clock().now().nanoseconds // 1e6)}", instruction=msg.data)
+    def control_callback(self, msg: EpisodeControl):
+        if msg.command == EpisodeControl.COMMAND_START:
+            self.policy.reset(episode_id=msg.episode_id, instruction=msg.instruction)
+            self._active = True
+            self.get_logger().info(f"Started episode '{msg.episode_id}'.")
+        elif msg.episode_id == self.policy.episode_id:
+            self._active = False
+            self.get_logger().info(f"Stopped episode '{msg.episode_id}': {msg.reason}")
 
     def timer_callback(self):
+        if not self._active:
+            return
         now_msg = self.get_clock().now().to_msg()
         stamp_sec = now_msg.sec + now_msg.nanosec * 1e-9
 
@@ -104,6 +118,8 @@ class VlnMockPolicyNode(Node if rclpy else object):
         self._publish_action(action_data, now_msg)
 
     def image_callback(self, msg: Image):
+        if not self._active:
+            return
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         action_data = self.policy.step(obs_stamp_sec=stamp_sec)
         self._publish_action(action_data, msg.header.stamp)
@@ -120,6 +136,8 @@ class VlnMockPolicyNode(Node if rclpy else object):
         out_msg.inference_latency_ms = float(action_data.inference_latency_ms)
         out_msg.valid = bool(action_data.valid)
         out_msg.model_version = str(action_data.model_version)
+        out_msg.outcome = int(action_data.outcome)
+        out_msg.outcome_detail = str(action_data.outcome_detail)
 
         self.action_pub.publish(out_msg)
 

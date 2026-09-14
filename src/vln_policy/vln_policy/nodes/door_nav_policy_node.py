@@ -7,13 +7,12 @@ try:
     import rclpy
     from rclpy.node import Node
     from sensor_msgs.msg import Image
-    from std_msgs.msg import String
-    from vln_interfaces.msg import PolicyAction
+    from vln_interfaces.msg import EpisodeControl, PolicyAction
 except ImportError:
     rclpy = None
     Node = object
     Image = None
-    String = None
+    EpisodeControl = None
     PolicyAction = None
 
 from vln_policy.door_nav_policy import ReactiveDoorNavPolicy, ReactiveDoorNavConfig
@@ -32,6 +31,7 @@ class VlnDoorNavPolicyNode(Node if rclpy else object):
         self.declare_parameter('instruction', 'find and approach doorway')
         self.declare_parameter('approach_velocity', 0.35)
         self.declare_parameter('arrival_area_threshold', 0.18)
+        self.declare_parameter('autostart', False)
 
         ep_id = self.get_parameter('episode_id').get_parameter_value().string_value
         instruction = self.get_parameter('instruction').get_parameter_value().string_value
@@ -44,6 +44,7 @@ class VlnDoorNavPolicyNode(Node if rclpy else object):
         )
         self.policy = ReactiveDoorNavPolicy(config=config)
         self.policy.reset(episode_id=ep_id, instruction=instruction)
+        self._active = self.get_parameter('autostart').get_parameter_value().bool_value
 
         # QoS
         qos_sensor = rclpy.qos.QoSProfile(
@@ -70,11 +71,17 @@ class VlnDoorNavPolicyNode(Node if rclpy else object):
             qos_action,
         )
 
+        qos_control = rclpy.qos.QoSProfile(
+            reliability=rclpy.qos.ReliabilityPolicy.RELIABLE,
+            durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
+            history=rclpy.qos.HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         self.instruction_sub = self.create_subscription(
-            String,
-            '/vln/goal_instruction',
-            self.instruction_callback,
-            10,
+            EpisodeControl,
+            '/vln/episode_control',
+            self.control_callback,
+            qos_control,
         )
 
         self.get_logger().info(
@@ -82,12 +89,18 @@ class VlnDoorNavPolicyNode(Node if rclpy else object):
             f"area_thresh={area_thresh}, waiting for /vln/input/image)"
         )
 
-    def instruction_callback(self, msg: String):
-        new_ep = f"ep_{int(self.get_clock().now().nanoseconds // 1e6)}"
-        self.get_logger().info(f"Received new instruction: '{msg.data}'. Resetting episode {new_ep}.")
-        self.policy.reset(episode_id=new_ep, instruction=msg.data)
+    def control_callback(self, msg: EpisodeControl):
+        if msg.command == EpisodeControl.COMMAND_START:
+            self.policy.reset(episode_id=msg.episode_id, instruction=msg.instruction)
+            self._active = True
+            self.get_logger().info(f"Started episode '{msg.episode_id}'.")
+        elif msg.episode_id == self.policy.episode_id:
+            self._active = False
+            self.get_logger().info(f"Stopped episode '{msg.episode_id}': {msg.reason}")
 
     def image_callback(self, msg: Image):
+        if not self._active:
+            return
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
         # Convert Image message to numpy RGB array
@@ -122,6 +135,8 @@ class VlnDoorNavPolicyNode(Node if rclpy else object):
         out_msg.inference_latency_ms = float(action_data.inference_latency_ms)
         out_msg.valid = bool(action_data.valid)
         out_msg.model_version = str(action_data.model_version)
+        out_msg.outcome = int(action_data.outcome)
+        out_msg.outcome_detail = str(action_data.outcome_detail)
 
         self.action_pub.publish(out_msg)
 

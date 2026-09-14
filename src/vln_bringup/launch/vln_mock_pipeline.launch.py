@@ -71,10 +71,19 @@ def generate_launch_description():
         parameters=[LaunchConfiguration('params_file')],
     )
 
+    episode_manager_node = Node(
+        package='vln_core',
+        executable='vln_episode_manager_node',
+        name='vln_episode_manager_node',
+        output='screen',
+        parameters=[LaunchConfiguration('params_file')],
+    )
+
     return LaunchDescription([
         params_arg,
         mode_arg,
         mock_policy_node,
         action_adapter_node,
         safety_node,
+        episode_manager_node,
     ])

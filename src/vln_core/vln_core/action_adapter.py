@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from .protocol import PolicyActionData, TwistStampedData, validate_policy_action
+from .protocol import PolicyActionData, PolicyOutcome, TwistStampedData, validate_policy_action
 
 
 @dataclass
@@ -31,6 +31,7 @@ class ActionAdapter:
         self._consecutive_stop_count: int = 0
         self._is_latched_stopped: bool = False
         self._total_actions_processed: int = 0
+        self._last_sequence_id: Optional[int] = None
 
     @property
     def is_stopped(self) -> bool:
@@ -47,6 +48,7 @@ class ActionAdapter:
         self._consecutive_stop_count = 0
         self._is_latched_stopped = False
         self._total_actions_processed = 0
+        self._last_sequence_id = None
 
     def process_action(
         self,
@@ -81,6 +83,22 @@ class ActionAdapter:
                 TwistStampedData(header_stamp_sec=stamp, linear_x=0.0, angular_z=0.0),
                 False,
                 f"Invalid policy action rejected: {validation_error}",
+            )
+
+        if self._last_sequence_id is not None and action.sequence_id <= self._last_sequence_id:
+            return (
+                TwistStampedData(header_stamp_sec=stamp, linear_x=0.0, angular_z=0.0),
+                False,
+                f"Out-of-order policy action rejected: sequence_id={action.sequence_id} "
+                f"after {self._last_sequence_id}.",
+            )
+        self._last_sequence_id = action.sequence_id
+
+        if action.outcome == PolicyOutcome.FAILED:
+            return (
+                TwistStampedData(header_stamp_sec=stamp, linear_x=0.0, angular_z=0.0),
+                False,
+                f"Policy reported failure: {action.outcome_detail or 'unspecified failure'}",
             )
 
         # Check stopping probability

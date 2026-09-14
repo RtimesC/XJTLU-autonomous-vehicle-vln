@@ -18,6 +18,20 @@ class ReasonCode(IntEnum):
     REASON_HUMAN_TAKEOVER = 7
     REASON_ARBITER_REJECTED = 8
     REASON_INTERNAL_ERROR = 9
+    REASON_EPISODE_INACTIVE = 10
+    REASON_EMERGENCY_STOP = 11
+
+
+class PolicyOutcome(IntEnum):
+    """Terminal meaning of a policy action.
+
+    A failed inference/episode is deliberately not encoded as a high stop
+    probability.  Stop is a task-completion request; failure must abort.
+    """
+
+    RUNNING = 0
+    STOP_REQUESTED = 1
+    FAILED = 2
 
 
 @dataclass
@@ -33,6 +47,8 @@ class PolicyActionData:
     valid: bool
     model_version: str
     frame_id: str = "base_link"
+    outcome: PolicyOutcome = PolicyOutcome.RUNNING
+    outcome_detail: str = ""
 
 
 @dataclass
@@ -102,5 +118,13 @@ def validate_policy_action(
 
     if not action.model_version or not action.model_version.strip():
         return False, "model_version cannot be empty"
+
+    if action.frame_id != "base_link":
+        return False, f"frame_id must be 'base_link', got '{action.frame_id}'"
+
+    try:
+        PolicyOutcome(action.outcome)
+    except ValueError:
+        return False, f"unknown policy outcome: {action.outcome}"
 
     return True, None

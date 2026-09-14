@@ -4,6 +4,7 @@ from .protocol import (
     PolicyActionData,
     SafetyStatusData,
     ReasonCode,
+    PolicyOutcome,
     validate_policy_action,
 )
 from .action_adapter import ActionAdapter, ActionAdapterConfig
@@ -19,6 +20,7 @@ __all__ = [
     "PolicyActionData",
     "SafetyStatusData",
     "ReasonCode",
+    "PolicyOutcome",
     "validate_policy_action",
     "ActionAdapter",
     "ActionAdapterConfig",

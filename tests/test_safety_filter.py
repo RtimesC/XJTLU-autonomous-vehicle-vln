@@ -84,7 +84,7 @@ def test_emergency_stop_override():
     assert safe_cmd.linear_x == 0.0
     assert safe_cmd.angular_z == 0.0
     assert status.emergency_stop is True
-    assert status.reason_code == ReasonCode.REASON_OBSTACLE_STOP
+    assert status.reason_code == ReasonCode.REASON_EMERGENCY_STOP
 
 
 def test_human_takeover_override():
@@ -109,3 +109,31 @@ def test_nan_command_rejection():
     assert safe_cmd.angular_z == 0.0
     assert status.command_accepted is False
     assert status.reason_code == ReasonCode.REASON_INVALID_ACTION
+
+
+def test_stale_observation_is_rejected_when_ros_time_is_supplied():
+    f = SafetyFilter(SafetyFilterConfig(max_action_age_sec=0.1, max_linear_accel=10.0))
+    safe_cmd, status = f.filter_command(
+        TwistStampedData(header_stamp_sec=10.0, linear_x=0.2, angular_z=0.0),
+        episode_id="ep_001",
+        action_sequence_id=1,
+        current_time_monotonic=1.0,
+        current_time_stamp_sec=10.2,
+    )
+    assert safe_cmd.linear_x == 0.0
+    assert status.command_accepted is False
+    assert status.reason_code == ReasonCode.REASON_ACTION_EXPIRED
+
+
+def test_replayed_sequence_is_rejected():
+    f = SafetyFilter(SafetyFilterConfig(max_linear_accel=10.0, max_angular_accel=10.0))
+    f.filter_command(
+        TwistStampedData(header_stamp_sec=10.0, linear_x=0.2, angular_z=0.0),
+        episode_id="ep_001", action_sequence_id=2, current_time_monotonic=1.0,
+    )
+    safe_cmd, status = f.filter_command(
+        TwistStampedData(header_stamp_sec=10.1, linear_x=0.2, angular_z=0.0),
+        episode_id="ep_001", action_sequence_id=1, current_time_monotonic=1.1,
+    )
+    assert safe_cmd.linear_x == 0.0
+    assert status.reason_code == ReasonCode.REASON_ACTION_EXPIRED
