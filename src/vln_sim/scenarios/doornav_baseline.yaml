@@ -1,0 +1,95 @@
+scenarios:
+  # === Baseline: direct approach ===
+  - scenario_id: straight_approach
+    instruction: "Walk through the open doorway ahead and stop"
+    start_x: 0.0
+    start_y: 0.0
+    start_yaw: 0.0
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 15.0
+    max_steps: 120
+    tags: [seen, indoor, single_door, baseline]
+
+  # === Heading offset ablation ===
+  - scenario_id: heading_offset_15deg
+    instruction: "Navigate to the doorway and stop"
+    start_x: 0.0
+    start_y: 0.0
+    start_yaw: 0.2618  # ~15 degrees left
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 20.0
+    max_steps: 150
+    tags: [seen, indoor, single_door, heading_ablation]
+
+  - scenario_id: heading_offset_30deg
+    instruction: "Find and approach the doorway, then stop"
+    start_x: 0.0
+    start_y: 0.0
+    start_yaw: 0.5236  # ~30 degrees left
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 25.0
+    max_steps: 180
+    tags: [seen, indoor, single_door, heading_ablation]
+
+  - scenario_id: heading_offset_neg15deg
+    instruction: "Go through the doorway"
+    start_x: 0.0
+    start_y: 0.0
+    start_yaw: -0.2618  # ~15 degrees right
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 20.0
+    max_steps: 150
+    tags: [seen, indoor, single_door, heading_ablation]
+
+  # === Starting distance ablation ===
+  - scenario_id: close_start
+    instruction: "Approach the nearby doorway and stop"
+    start_x: 1.5
+    start_y: 0.0
+    start_yaw: 0.0
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 10.0
+    max_steps: 80
+    tags: [seen, indoor, single_door, distance_ablation]
+
+  - scenario_id: far_start
+    instruction: "Walk forward to reach the doorway at the end of the corridor"
+    start_x: -1.0
+    start_y: 0.0
+    start_yaw: 0.0
+    success_region:
+      center_x: 3.0
+      center_y: 0.0
+      radius: 0.5
+    max_duration_sec: 30.0
+    max_steps: 200
+    tags: [seen, indoor, single_door, distance_ablation]
+
+  # === Timeout/failure scenarios (should NOT succeed) ===
+  - scenario_id: impossible_timeout
+    instruction: "Navigate to a doorway that does not exist"
+    start_x: 0.0
+    start_y: 0.0
+    start_yaw: 0.0
+    success_region:
+      center_x: 100.0
+      center_y: 100.0
+      radius: 0.5
+    max_duration_sec: 3.0
+    max_steps: 30
+    tags: [unseen, indoor, negative_test]
