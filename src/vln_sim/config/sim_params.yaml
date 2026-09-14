@@ -1,0 +1,10 @@
+vln_habitat_bridge_node:
+  ros__parameters:
+    image_width: 640
+    image_height: 480
+    sensor_height: 0.45
+    hfov: 90.0
+    step_rate_hz: 10.0
+    watchdog_timeout_sec: 0.5
+    scene_path: "data/scene_datasets/habitat-test-scenes/skokloster-castle.glb"
+    agent_radius: 0.38625
