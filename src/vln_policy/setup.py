@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vln_mock_policy_node = vln_policy.nodes.mock_policy_node:main',
+            'vln_door_nav_policy_node = vln_policy.nodes.door_nav_policy_node:main',
         ],
     },
 )
