@@ -21,6 +21,7 @@ setup(
         'console_scripts': [
             'vln_action_adapter_node = vln_core.nodes.action_adapter_node:main',
             'vln_safety_node = vln_core.nodes.safety_node:main',
+            'vln_episode_manager_node = vln_core.nodes.episode_manager_node:main',
         ],
     },
 )
