@@ -1,0 +1,13 @@
+# Goal
+string episode_id
+string instruction
+---
+# Result
+bool completed
+string termination_reason
+float32 elapsed_time_s
+---
+# Feedback
+string state
+uint64 latest_action_sequence_id
+float32 latest_stop_probability
