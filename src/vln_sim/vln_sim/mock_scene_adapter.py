@@ -1,6 +1,7 @@
 """Mock indoor scene simulator adapter for headless testing without Habitat binary."""
 
 import time
+from typing import Optional
 import numpy as np
 
 from .bridge_core import BaseSimAdapter, SimAgentPose, SimObservation, integrate_differential_drive
@@ -19,8 +20,8 @@ class MockSceneAdapter(BaseSimAdapter):
         self.pose = SimAgentPose()
         self._step_counter = 0
 
-    def reset(self) -> SimObservation:
-        self.pose = SimAgentPose()
+    def reset(self, init_pose: Optional[SimAgentPose] = None) -> SimObservation:
+        self.pose = init_pose if init_pose is not None else SimAgentPose()
         self._step_counter = 0
         return self._render(time.time())
 
@@ -33,36 +34,51 @@ class MockSceneAdapter(BaseSimAdapter):
         pass
 
     def _render(self, timestamp: float) -> SimObservation:
-        # Create a procedural synthetic corridor view
-        img = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        # Create a procedural synthetic indoor corridor view
+        img = np.full((self.height, self.width, 3), 200, dtype=np.uint8)  # End corridor wall
 
-        # Ceiling (dark gray)
-        img[0 : self.height // 2, :] = [80, 80, 90]
-        # Floor (light gray / tile)
-        img[self.height // 2 :, :] = [160, 160, 170]
+        # Ceiling
+        ceil_h = int(self.height * 0.15)
+        img[:ceil_h, :] = [75, 75, 80]
+
+        # Floor
+        floor_y = int(self.height * 0.75)
+        img[floor_y:, :] = [140, 140, 145]
 
         # Perspective corridor vanishing point influenced by robot yaw
-        cx = int(self.width / 2 - self.pose.yaw * (self.width / 2))
+        # In camera coordinates, when robot yaw > 0 (turned left), doorway appears to the right
+        cx = int(self.width / 2 + self.pose.yaw * (self.width / 2))
         cx = max(0, min(self.width - 1, cx))
         cy = self.height // 2
 
-        # Draw left wall (bluish gray) and right wall (warm gray)
+        # Draw left wall and right wall
         for y in range(self.height):
             dy = abs(y - cy)
-            left_bound = max(0, int(cx - dy * 1.2))
-            right_bound = min(self.width, int(cx + dy * 1.2))
-            img[y, :left_bound] = [120, 130, 140]
-            img[y, right_bound:] = [140, 130, 120]
+            left_bound = max(0, int(cx - dy * 1.3))
+            right_bound = min(self.width, int(cx + dy * 1.3))
+            if left_bound > 0:
+                img[y, :left_bound] = [130, 135, 145]
+            if right_bound < self.width:
+                img[y, right_bound:] = [145, 135, 130]
 
         # Draw a synthetic doorway in front of robot, scaling with forward distance (x)
-        door_dist = max(0.5, 6.0 - self.pose.x)
-        door_w = max(10, int(180 / door_dist))
-        door_h = max(20, int(300 / door_dist))
+        door_dist = max(0.4, 4.0 - self.pose.x)
+        door_w = max(20, int(220 / door_dist))
+        door_h = max(40, int(420 / door_dist))
+
         d_x1 = max(0, cx - door_w // 2)
         d_x2 = min(self.width, cx + door_w // 2)
-        d_y1 = max(0, cy - door_h // 2)
-        d_y2 = min(self.height, cy + door_h // 2)
-        img[d_y1:d_y2, d_x1:d_x2] = [40, 60, 100]  # Dark door frame
+        d_y2 = min(self.height, floor_y)
+        d_y1 = max(ceil_h, d_y2 - door_h)
+
+        if d_x2 > d_x1 and d_y2 > d_y1:
+            # Dark doorway interior
+            img[d_y1:d_y2, d_x1:d_x2] = [35, 35, 45]
+            # High-contrast door frame border
+            border_thick = max(2, int(6 / door_dist))
+            img[d_y1 : min(d_y2, d_y1 + border_thick), d_x1:d_x2] = [15, 15, 20]
+            img[d_y1:d_y2, d_x1 : min(d_x2, d_x1 + border_thick)] = [15, 15, 20]
+            img[d_y1:d_y2, max(d_x1, d_x2 - border_thick) : d_x2] = [15, 15, 20]
 
         return SimObservation(
             rgb=img,

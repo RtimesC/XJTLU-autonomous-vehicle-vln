@@ -119,7 +119,7 @@ class OpenCVDoorGrounder:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 7))
         closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
 
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(closed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         candidates: List[DoorCandidate] = []
 
         for cnt in contours:
