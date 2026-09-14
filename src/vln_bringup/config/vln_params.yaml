@@ -1,0 +1,24 @@
+vln_mock_policy_node:
+  ros__parameters:
+    mode: "timer"
+    frequency_hz: 10.0
+    target_linear_velocity: 0.35
+    target_angular_velocity: 0.0
+    steps_to_stop: 30
+    episode_id: "ep_mock_001"
+    instruction: "follow corridor forward and stop before elevator"
+
+vln_action_adapter:
+  ros__parameters:
+    stop_threshold: 0.8
+    consecutive_stop_frames: 3
+
+vln_safety_node:
+  ros__parameters:
+    max_linear_velocity: 0.8
+    min_linear_velocity: -0.2
+    max_angular_velocity: 1.0
+    max_linear_accel: 0.8
+    max_angular_accel: 1.5
+    watchdog_timeout_sec: 0.4
+    timer_frequency_hz: 20.0
