@@ -21,14 +21,20 @@
 
 ## 验证命令
 
-```text
-PYTHONPATH=src python scripts/verify_first_version.py
+```bash
+PYTHONPATH=src python3 scripts/verify_first_version.py
 ```
 
 本地回放界面：
 
-```text
-PYTHONPATH=src python scripts/run_web.py \\
+```bash
+PYTHONPATH=src python3 scripts/run_web.py \\
   --input examples/replay_episode.jsonl \\
   --goal 4205
+```
+
+Linux 快捷启动（目标房间号作为唯一参数）：
+
+```bash
+./scripts/start_web_linux.sh 4205
 ```

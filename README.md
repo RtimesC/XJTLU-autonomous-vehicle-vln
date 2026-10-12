@@ -35,10 +35,16 @@ runs/                   实验运行数据（不提交原始大文件）
 
 macOS 或 Linux 均可使用示例回放启动本地交互界面：
 
-```text
-PYTHONPATH=src python scripts/run_web.py \\
+```bash
+PYTHONPATH=src python3 scripts/run_web.py \\
   --input examples/replay_episode.jsonl \\
   --goal 4205
 ```
 
 浏览器打开 `http://127.0.0.1:8765`。当前界面使用确定性的模拟 VLM；接入远程 API 和 D455f 时替换对应适配器，不改变交互流程。
+
+Linux 快捷启动（目标房间号作为唯一参数）：
+
+```bash
+./scripts/start_web_linux.sh 4205
+```
