@@ -10,7 +10,13 @@ from reasonnav_stage1.camera import CameraConfig, RGBDFrame, ReplayCamera, RealS
 from reasonnav_stage1.contracts import Goal
 from reasonnav_stage1.replay import JsonlReplay
 from reasonnav_stage1.runtime import EpisodeRunner
-from reasonnav_stage1.vlm import MockVLMBackend, navigation_intent_from_json
+from reasonnav_stage1.vlm import (
+    MockObservationBackend,
+    MockVLMBackend,
+    TieredVLMBackend,
+    VLMRequest,
+    navigation_intent_from_json,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +29,18 @@ def main() -> None:
         backend=MockVLMBackend(),
     )
     assert [response.intent.intent.value for response in responses] == ["advance", "observe"]
+
+    tiered = TieredVLMBackend(observer=MockObservationBackend(), planner=MockVLMBackend())
+    first_frame = next(JsonlReplay(replay_path).frames())
+    tiered_response = tiered.generate(
+        VLMRequest(
+            goal=Goal(type="room", value="4205"),
+            observation=first_frame.observation,
+            memory=first_frame.memory,
+            action_history=first_frame.action_history,
+        )
+    )
+    assert tiered_response.metadata["routing"] == "tiered"
 
     runner = EpisodeRunner(
         goal=Goal(type="room", value="4205"),

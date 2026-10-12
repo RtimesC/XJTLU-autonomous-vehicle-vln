@@ -48,3 +48,26 @@ Linux 快捷启动（目标房间号作为唯一参数）：
 ```bash
 ./scripts/start_web_linux.sh 4205
 ```
+
+## 两级 API 模型模式
+
+按照 ReasonNav 的高层规划思路，项目支持低成本观测模型 + 高质量规划模型：
+
+- `qwen3-vl-8b-instruct`：生成当前观测摘要和候选地标
+- `qwen3-vl-plus`：结合目标、观测摘要和历史记忆生成导航意图
+
+API Key 只从环境变量读取，不写入代码或运行参数：
+
+```bash
+export REASONNAV_API_KEY='你的 API Key'
+export REASONNAV_BACKEND=tiered
+export REASONNAV_PLANNER_MODEL=qwen3-vl-plus
+export REASONNAV_FAST_MODEL=qwen3-vl-8b-instruct
+
+PYTHONPATH=src python3 scripts/run_web.py \
+  --backend tiered \
+  --input examples/replay_episode.jsonl \
+  --goal 4205
+```
+
+只使用高层模型进行对照测试时，将 `--backend tiered` 改为 `--backend api`。没有 API Key 时继续使用默认的 `mock` 模式。模型只输出高层导航意图，不直接输出速度或控制小车。

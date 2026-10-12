@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -77,8 +78,30 @@ class VLMResponse:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class ObservationSummary:
+    """Compact low-cost observation result passed to the planner."""
+
+    scene: str
+    landmarks: list[dict[str, Any]] = field(default_factory=list)
+    uncertainty: float | None = None
+    raw_text: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scene": self.scene,
+            "landmarks": self.landmarks,
+            "uncertainty": self.uncertainty,
+        }
+
+
 class VLMBackend(Protocol):
     def generate(self, request: VLMRequest) -> VLMResponse:
+        ...
+
+
+class ObservationBackend(Protocol):
+    def summarize(self, request: VLMRequest) -> ObservationSummary:
         ...
 
 
@@ -119,6 +142,45 @@ class MockVLMBackend:
             latency_ms=(time.perf_counter() - started) * 1000,
             provider="mock",
         )
+
+
+class MockObservationBackend:
+    """Deterministic observation stage for offline replay and verification."""
+
+    def summarize(self, request: VLMRequest) -> ObservationSummary:
+        depth = request.observation.depth_summary
+        scene = "前方走廊，深度有效" if depth.valid_fraction else "当前观测场景"
+        return ObservationSummary(
+            scene=scene,
+            landmarks=list(request.memory),
+            uncertainty=0.2 if depth.valid_fraction else 0.8,
+            raw_text=json.dumps({"scene": scene, "landmarks": list(request.memory)}, ensure_ascii=False),
+        )
+
+
+class TieredVLMBackend:
+    """Use a cheap observer before the higher-quality navigation planner."""
+
+    def __init__(self, *, observer: ObservationBackend, planner: VLMBackend) -> None:
+        self.observer = observer
+        self.planner = planner
+
+    def generate(self, request: VLMRequest) -> VLMResponse:
+        summary = self.observer.summarize(request)
+        metadata = dict(request.observation.metadata)
+        metadata["observation_summary"] = summary.to_dict()
+        enriched_observation = replace(request.observation, metadata=metadata)
+        enriched_request = replace(request, observation=enriched_observation)
+        response = self.planner.generate(enriched_request)
+        response.metadata.update(
+            {
+                "routing": "tiered",
+                "observation_model": getattr(self.observer, "model", "mock"),
+                "planner_model": getattr(self.planner, "model", "mock"),
+                "observation_summary": summary.to_dict(),
+            }
+        )
+        return response
 
 
 class OpenAICompatibleVLM:
@@ -187,6 +249,95 @@ class OpenAICompatibleVLM:
             provider="openai-compatible",
             metadata={"model": self.model},
         )
+
+
+class OpenAICompatibleObservationBackend:
+    """OpenAI-compatible low-cost visual observation stage."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout_s: float = 60.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout_s = timeout_s
+
+    def summarize(self, request: VLMRequest) -> ObservationSummary:
+        system_instruction = (
+            "You are the low-cost observation stage of an indoor navigation system. "
+            "Return only valid JSON with scene, landmarks, and uncertainty. "
+            "Do not choose motion, coordinates, or velocity."
+        )
+        prompt = (
+            "Summarize the current RGB-D navigation observation for a higher-level planner. "
+            "Use JSON with this shape: {\"scene\": string, "
+            "\"landmarks\": [{\"type\": string, \"text\": string, "
+            "\"direction\": string|null}], \"uncertainty\": number}.\n\n"
+            + request.to_text()
+        )
+        body = {
+            "model": self.model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": self._content(request, prompt)},
+            ],
+        }
+        raw_text = self._call(body)
+        try:
+            payload = json.loads(raw_text)
+            scene = str(payload["scene"])
+            landmarks = payload.get("landmarks", [])
+            uncertainty = payload.get("uncertainty")
+            if not isinstance(landmarks, list):
+                raise ValueError("landmarks must be a list")
+            if uncertainty is not None:
+                uncertainty = float(uncertainty)
+                if not 0 <= uncertainty <= 1:
+                    raise ValueError("uncertainty must be between 0 and 1")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid observation summary: {exc}") from exc
+        return ObservationSummary(
+            scene=scene,
+            landmarks=landmarks,
+            uncertainty=uncertainty,
+            raw_text=raw_text,
+        )
+
+    def _content(self, request: VLMRequest, prompt: str) -> list[dict[str, Any]]:
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if request.observation.rgb_path:
+            image_url = _image_as_data_url(Path(request.observation.rgb_path))
+            if image_url:
+                content.append({"type": "image_url", "image_url": {"url": image_url}})
+        return content
+
+    def _call(self, body: dict[str, Any]) -> str:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        http_request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(http_request, timeout=self.timeout_s) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"observation VLM HTTP {exc.code}: {detail[:500]}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"observation VLM connection failed: {exc.reason}") from exc
+        return _extract_chat_content(response_data)
 
 
 def navigation_intent_from_json(raw_text: str) -> NavigationIntent:

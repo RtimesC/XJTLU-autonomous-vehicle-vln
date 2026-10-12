@@ -29,7 +29,11 @@ __all__ = [
 from .replay import JsonlReplay, ReplayFrame
 from .vlm import (
     MockVLMBackend,
+    MockObservationBackend,
     OpenAICompatibleVLM,
+    OpenAICompatibleObservationBackend,
+    ObservationSummary,
+    TieredVLMBackend,
     VLMBackend,
     VLMRequest,
     VLMResponse,
@@ -40,7 +44,11 @@ __all__ += [
     "JsonlReplay",
     "ReplayFrame",
     "MockVLMBackend",
+    "MockObservationBackend",
     "OpenAICompatibleVLM",
+    "OpenAICompatibleObservationBackend",
+    "ObservationSummary",
+    "TieredVLMBackend",
     "VLMBackend",
     "VLMRequest",
     "VLMResponse",

@@ -54,3 +54,14 @@ ui/
 ## D455f 适配器
 
 `reasonnav_stage1.camera.RealSenseD455fCamera` 只在调用 `start()` 时加载 `pyrealsense2`。因此 macOS 可以导入和测试核心代码而不安装 RealSense SDK；真实 D455f 采集必须在 Linux 运行端完成。
+
+## API 模型分层
+
+模型调用采用两级 API 结构：低成本视觉模型先生成观测摘要和候选地标，高质量规划模型再结合目标与历史记忆输出单步导航意图。默认模型配置为：
+
+```text
+fast/observation: qwen3-vl-8b-instruct
+planner/intent:   qwen3-vl-plus
+```
+
+通过 `REASONNAV_BACKEND=tiered` 启用两级模式；API Key 使用 `REASONNAV_API_KEY` 环境变量。`mock` 模式仍用于无网络离线回放。模型只负责高层意图，实际执行和未来车辆控制仍属于独立适配器。
